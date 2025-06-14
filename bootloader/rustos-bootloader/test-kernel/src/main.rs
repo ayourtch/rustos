@@ -71,14 +71,54 @@ pub extern "C" fn _start(boot_info: *const BootInfo) -> ! {
             
             // Try to use framebuffer info from boot_info
             let fb_info = &boot_info_ref.framebuffer;
-            if fb_info.addr != 0 && fb_info.width > 0 && fb_info.height > 0 {
+            
+            // Let's visualize the framebuffer values by drawing patterns
+            // We'll use the position and size of rectangles to show the values
+            
+            // Show fb_info.addr by drawing rectangles (each bit represented)
+            // Draw dots to show if addr is non-zero
+            if fb_info.addr != 0 {
+                // Draw cyan rectangle to show addr is non-zero
+                for y in 300..350 {
+                    for x in 0..100 {
+                        let pixel_offset = (y * width + x) as isize;
+                        *fb_addr.offset(pixel_offset) = 0xFF00FFFF; // Cyan - addr non-zero
+                    }
+                }
+            }
+            
+            // Show width by drawing rectangles
+            if fb_info.width > 0 && fb_info.width < 10000 { // Reasonable width
+                // Draw orange rectangle to show width is reasonable
+                for y in 350..400 {
+                    for x in 0..100 {
+                        let pixel_offset = (y * width + x) as isize;
+                        *fb_addr.offset(pixel_offset) = 0xFFFF8000; // Orange - width reasonable
+                    }
+                }
+            }
+            
+            // Show height
+            if fb_info.height > 0 && fb_info.height < 10000 { // Reasonable height
+                // Draw pink rectangle to show height is reasonable
+                for y in 400..450 {
+                    for x in 0..100 {
+                        let pixel_offset = (y * width + x) as isize;
+                        *fb_addr.offset(pixel_offset) = 0xFFFF80FF; // Pink - height reasonable
+                    }
+                }
+            }
+            
+            // If all values look good, try using them
+            if fb_info.addr != 0 && fb_info.width > 0 && fb_info.height > 0 
+               && fb_info.width < 10000 && fb_info.height < 10000 {
                 // Update our values with boot_info values
                 fb_addr = fb_info.addr as *mut u32;
                 width = fb_info.width;
                 height = fb_info.height;
                 
                 // Draw magenta rectangle to show we're using boot_info framebuffer
-                for y in 300..400 {
+                for y in 450..500 {
                     for x in 0..200 {
                         let pixel_offset = (y * width + x) as isize;
                         *fb_addr.offset(pixel_offset) = 0xFFFF00FF; // Magenta - using boot_info fb
