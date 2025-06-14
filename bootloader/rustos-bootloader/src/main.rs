@@ -167,7 +167,7 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
         }
         
         // Small delay to make it visible
-        for _ in 0..50000000 {
+        for _ in 0..500000 {
             core::arch::asm!("nop");
         }
     }
@@ -187,7 +187,7 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
         }
         
         // Small delay
-        for _ in 0..10000000 {
+        for _ in 0..1000000 {
             core::arch::asm!("nop");
         }
         
