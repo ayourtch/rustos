@@ -135,6 +135,12 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
         .exit_boot_services(MemoryType::LOADER_DATA);
     
     // At this point, we can't use stdout anymore, but we can try to jump to kernel
+    // Let's try to signal that we're about to jump by writing to a memory location
+    unsafe {
+        // Write a magic value to indicate we're about to jump
+        *(0xb8000 as *mut u16) = 0x0F42; // 'B' in white on black (VGA text mode)
+    }
+
     // Jump to kernel
     unsafe {
         let kernel_entry: extern "C" fn(*const BootInfo) -> ! = mem::transmute(entry_point);
