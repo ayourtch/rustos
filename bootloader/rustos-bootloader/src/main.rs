@@ -13,7 +13,6 @@ use uefi::proto::console::gop::{GraphicsOutput, PixelFormat};
 use uefi::proto::media::file::{File, FileAttribute, FileMode};
 use uefi::proto::media::fs::SimpleFileSystem;
 use uefi::table::boot::{MemoryDescriptor, MemoryType};
-use uefi_services::println;
 
 const BOOT_INFO_ADDR: u64 = 0x8000_0000;
 const KERNEL_ADDR: u64 = 0x4000_0000;
@@ -107,6 +106,15 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
     system_table.stdout().write_str("Setting up identity mapping...\n").unwrap();
     setup_identity_mapping(system_table.boot_services()).expect("Failed to setup identity mapping");
     
+    // Allocate kernel stack before exiting boot services
+    system_table.stdout().write_str("Allocating kernel stack...\n").unwrap();
+    let stack_pages = system_table.boot_services().allocate_pages(
+        uefi::table::boot::AllocateType::AnyPages,
+        MemoryType::LOADER_DATA,
+        16, // 16 pages = 64KB
+    ).expect("Failed to allocate kernel stack");
+    let stack_top = stack_pages + (16 * 0x1000); // Stack grows downward
+    
     // Get memory map before exiting boot services
     system_table.stdout().write_str("Getting memory map...\n").unwrap();
     system_table.stdout().write_str("About to call get_memory_map\n").unwrap();
@@ -191,11 +199,37 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
             core::arch::asm!("nop");
         }
         
-        // Try different ways to jump to the kernel
+    // Jump to kernel
+    unsafe {
+        // Draw a blue rectangle before jumping to show we're about to call kernel
+        let boot_info_ref = &*(boot_info_addr as *const BootInfo);
+        let fb_addr = boot_info_ref.framebuffer.addr as *mut u32;
+        let fb_width = boot_info_ref.framebuffer.width;
         
-        // Method 1: Try jumping without parameters first
-        let kernel_entry_no_params: extern "C" fn() -> ! = mem::transmute(entry_point);
-        kernel_entry_no_params();
+        for y in 200..250 {
+            for x in 0..200 {
+                let pixel_offset = (y * fb_width + x) as isize;
+                *fb_addr.offset(pixel_offset) = 0x0000FF; // Blue rectangle - "about to jump"
+            }
+        }
+        
+        // Small delay
+        for _ in 0..10000000 {
+            core::arch::asm!("nop");
+        }
+        
+        // Set up stack and jump to kernel
+        core::arch::asm!(
+            "mov rsp, {stack_top}",      // Set up stack pointer
+            "push rbp",                   // Set up frame pointer
+            "mov rbp, rsp",
+            "call {entry_point}",         // Call kernel entry point
+            stack_top = in(reg) stack_top,
+            entry_point = in(reg) entry_point,
+            in("rdi") boot_info_addr,     // Pass boot_info as first parameter
+            options(noreturn)
+        );
+    }
     }
 }
 
