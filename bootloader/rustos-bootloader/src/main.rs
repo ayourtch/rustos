@@ -151,31 +151,19 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
         .exit_boot_services(MemoryType::LOADER_DATA);
     
     // At this point, we can't use stdout anymore
-    // Let's try to write directly to the framebuffer instead of VGA text
+    // Let's try a very simple test first - just write to VGA text buffer
     unsafe {
-        // Get framebuffer info from our boot_info before we pass it to kernel
-        let boot_info_ref = &*(boot_info_addr as *const BootInfo);
-        let fb_addr = boot_info_ref.framebuffer.addr as *mut u32;
-        let fb_width = boot_info_ref.framebuffer.width;
-        
-        // Draw a red rectangle in top-left corner to show bootloader reached this point
-        for y in 0..50 {
-            for x in 0..100 {
-                let pixel_offset = (y * fb_width + x) as isize;
-                *fb_addr.offset(pixel_offset) = 0xFF0000; // Red
-            }
-        }
-        
-        // Small delay
-        for _ in 0..10000000 {
-            core::arch::asm!("nop");
-        }
+        // Try VGA text mode first
+        *(0xb8000 as *mut u16) = 0x4F52; // 'R' in white on red background
+        *(0xb8002 as *mut u16) = 0x4F45; // 'E' in white on red background
+        *(0xb8004 as *mut u16) = 0x4F44; // 'D' in white on red background
     }
     
-    // Jump to kernel
-    unsafe {
-        let kernel_entry: extern "C" fn(*const BootInfo) -> ! = mem::transmute(entry_point);
-        kernel_entry(boot_info_addr as *const BootInfo);
+    // Infinite loop instead of jumping to kernel for now
+    loop {
+        unsafe {
+            core::arch::asm!("hlt");
+        }
     }
 }
 
