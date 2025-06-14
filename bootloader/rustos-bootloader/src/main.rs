@@ -13,7 +13,6 @@ use uefi::proto::console::gop::{GraphicsOutput, PixelFormat};
 use uefi::proto::media::file::{File, FileAttribute, FileMode};
 use uefi::proto::media::fs::SimpleFileSystem;
 use uefi::table::boot::{MemoryDescriptor, MemoryType};
-use uefi_services::println;
 
 const BOOT_INFO_ADDR: u64 = 0x8000_0000;
 const KERNEL_ADDR: u64 = 0x4000_0000;
@@ -136,6 +135,22 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
         1, // 1 page should be enough for BootInfo
     ).expect("Failed to allocate BootInfo memory");
     
+    // Allocate memory for kernel stack (64KB = 16 pages)
+    system_table.stdout().write_str("Allocating kernel stack...\n").unwrap();
+    let stack_pages = 16; // 64KB stack
+    let stack_bottom = system_table.boot_services().allocate_pages(
+        uefi::table::boot::AllocateType::AnyPages,
+        MemoryType::LOADER_DATA,
+        stack_pages,
+    ).expect("Failed to allocate kernel stack");
+    let stack_top = stack_bottom + (stack_pages as u64 * 0x1000); // Stack grows downward
+    
+    system_table.stdout().write_str("Stack allocated at: 0x").unwrap();
+    print_hex(&mut system_table, stack_bottom);
+    system_table.stdout().write_str(" - 0x").unwrap();
+    print_hex(&mut system_table, stack_top);
+    system_table.stdout().write_str("\n").unwrap();
+    
     system_table.stdout().write_str("Placing BootInfo at allocated address...\n").unwrap();
     unsafe {
         let boot_info_ptr = boot_info_addr as *mut BootInfo;
@@ -167,12 +182,12 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
         }
         
         // Small delay to make it visible
-        for _ in 0..500000 {
+        for _ in 0..50000000 {
             core::arch::asm!("nop");
         }
     }
     
-    // Jump to kernel
+    // Jump to kernel with proper stack setup
     unsafe {
         // Draw a blue rectangle before jumping to show we're about to call kernel
         let boot_info_ref = &*(boot_info_addr as *const BootInfo);
@@ -187,18 +202,22 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
         }
         
         // Small delay
-        for _ in 0..1000000 {
+        for _ in 0..10000000 {
             core::arch::asm!("nop");
         }
         
-        // For debugging, let's try passing just the framebuffer info
-        let kernel_entry_fb_only: extern "C" fn(*const FramebufferInfo) -> ! = mem::transmute(entry_point);
-        
-        // Get the framebuffer info from boot_info  
-        let boot_info_ref = &*(boot_info_addr as *const BootInfo);
-        let fb_info_ptr = &boot_info_ref.framebuffer as *const FramebufferInfo;
-        
-        kernel_entry_fb_only(fb_info_ptr);
+        // Set up proper stack and jump to kernel
+        core::arch::asm!(
+            "mov rsp, {stack_top}",      // Set stack pointer
+            "push rbp",                  // Set up stack frame
+            "mov rbp, rsp",
+            "sub rsp, 32",              // Red zone for System V ABI
+            "call {kernel_entry}",       // Call kernel
+            stack_top = in(reg) stack_top,
+            kernel_entry = in(reg) entry_point,
+            in("rdi") boot_info_addr,    // First parameter (boot_info)
+            options(noreturn)
+        );
     }
 }
 
