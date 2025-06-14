@@ -30,14 +30,28 @@ pub struct FramebufferInfo {
 #[no_mangle]
 pub extern "C" fn _start(boot_info: *const BootInfo) -> ! {
     unsafe {
+        // Draw a yellow rectangle IMMEDIATELY when kernel starts
+        // This should appear before any other kernel code
+        let fb_addr = 0x80000000 as *mut u32; // Use hardcoded framebuffer address for now
+        let fb_width = 2048u32; // Use hardcoded width
+        
+        // Draw yellow rectangle to show kernel started
+        for y in 300..350 {
+            for x in 0..200 {
+                let pixel_offset = (y * fb_width + x) as isize;
+                *fb_addr.offset(pixel_offset) = 0xFFFF00; // Yellow
+            }
+        }
+        
+        // Now try to use the boot_info parameter
         let boot_info = &*boot_info;
         
-        // Get framebuffer info
+        // Get proper framebuffer info
         let fb_addr = boot_info.framebuffer.addr as *mut u32;
         let fb_width = boot_info.framebuffer.width;
         let fb_height = boot_info.framebuffer.height;
         
-        // Draw a green rectangle in top-right corner to show kernel started
+        // Draw a green rectangle in top-right corner to show kernel started with boot_info
         for y in 0..50 {
             for x in (fb_width - 100)..fb_width {
                 let pixel_offset = (y * fb_width + x) as isize;

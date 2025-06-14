@@ -174,6 +174,23 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
     
     // Jump to kernel
     unsafe {
+        // Draw a blue rectangle before jumping to show we're about to call kernel
+        let boot_info_ref = &*(boot_info_addr as *const BootInfo);
+        let fb_addr = boot_info_ref.framebuffer.addr as *mut u32;
+        let fb_width = boot_info_ref.framebuffer.width;
+        
+        for y in 200..250 {
+            for x in 0..200 {
+                let pixel_offset = (y * fb_width + x) as isize;
+                *fb_addr.offset(pixel_offset) = 0x0000FF; // Blue rectangle - "about to jump"
+            }
+        }
+        
+        // Small delay
+        for _ in 0..10000000 {
+            core::arch::asm!("nop");
+        }
+        
         let kernel_entry: extern "C" fn(*const BootInfo) -> ! = mem::transmute(entry_point);
         kernel_entry(boot_info_addr as *const BootInfo);
     }
