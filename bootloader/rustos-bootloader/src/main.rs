@@ -79,6 +79,17 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
     system_table.stdout().write_str("Setting up graphics...\n").unwrap();
     let framebuffer_info = setup_graphics(system_table.boot_services()).expect("Failed to setup graphics");
     
+    // Debug: Print framebuffer info
+    system_table.stdout().write_str("Framebuffer addr: 0x").unwrap();
+    print_hex(&mut system_table, framebuffer_info.addr);
+    system_table.stdout().write_str("\n").unwrap();
+    system_table.stdout().write_str("Framebuffer width: ").unwrap();
+    print_decimal(&mut system_table, framebuffer_info.width as u64);
+    system_table.stdout().write_str("\n").unwrap();
+    system_table.stdout().write_str("Framebuffer height: ").unwrap();
+    print_decimal(&mut system_table, framebuffer_info.height as u64);
+    system_table.stdout().write_str("\n").unwrap();
+    
     // Load kernel from filesystem
     system_table.stdout().write_str("Loading kernel...\n").unwrap();
     let kernel_data = load_kernel(system_table.boot_services(), image).expect("Failed to load kernel");
@@ -443,5 +454,25 @@ fn print_hex(system_table: &mut SystemTable<Boot>, value: u64) {
         let digit = ((value >> (i * 4)) & 0xF) as usize;
         let ch = hex_chars[digit] as char;
         system_table.stdout().write_char(ch).unwrap();
+    }
+}
+
+fn print_decimal(system_table: &mut SystemTable<Boot>, mut value: u64) {
+    if value == 0 {
+        system_table.stdout().write_char('0').unwrap();
+        return;
+    }
+    
+    let mut digits = [0u8; 20];
+    let mut count = 0;
+    
+    while value > 0 {
+        digits[count] = (value % 10) as u8 + b'0';
+        value /= 10;
+        count += 1;
+    }
+    
+    for i in (0..count).rev() {
+        system_table.stdout().write_char(digits[i] as char).unwrap();
     }
 }
