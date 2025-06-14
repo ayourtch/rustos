@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eux
+
+cd test-kernel
+
+cargo build --target x86_64-unknown-none --release
+cd ..
+cp test-kernel/target/x86_64-unknown-none/release/test-kernel esp/kernel.elf
+
+# Build bootloader
+cargo build --target x86_64-unknown-uefi
+cp target/x86_64-unknown-uefi/debug/rustos-bootloader.efi esp/EFI/BOOT/BOOTX64.EFI
+
+# Test
+qemu-system-x86_64 \
+    -m 256M \
+    -bios /usr/share/ovmf/OVMF.fd \
+    -drive format=raw,file=fat:rw:esp \
+    -net none

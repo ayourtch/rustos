@@ -193,21 +193,9 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
         
         // Try different ways to jump to the kernel
         
-        // Method 1: Try jumping without parameters (for assembly kernel)
+        // Method 1: Try jumping without parameters first
         let kernel_entry_no_params: extern "C" fn() -> ! = mem::transmute(entry_point);
         kernel_entry_no_params();
-        
-        // If we get here, the jump failed - draw a red rectangle as an error indicator
-        for y in 400..450 {
-            for x in 0..200 {
-                let pixel_offset = (y * fb_width + x) as isize;
-                *fb_addr.offset(pixel_offset) = 0xFF0000; // Red - error
-            }
-        }
-        
-        loop {
-            core::arch::asm!("hlt");
-        }
     }
 }
 
