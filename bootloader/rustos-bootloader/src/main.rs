@@ -87,6 +87,11 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
     system_table.stdout().write_str("Parsing ELF...\n").unwrap();
     let entry_point = parse_elf_and_load(&kernel_data, system_table.boot_services()).expect("Failed to parse ELF");
     
+    // Debug: Print the entry point address
+    system_table.stdout().write_str("Entry point: 0x").unwrap();
+    print_hex(&mut system_table, entry_point);
+    system_table.stdout().write_str("\n").unwrap();
+
     // Set up identity mapping for first 1GB
     system_table.stdout().write_str("Setting up identity mapping...\n").unwrap();
     setup_identity_mapping(system_table.boot_services()).expect("Failed to setup identity mapping");
@@ -415,4 +420,13 @@ fn find_rsdp(system_table: &mut SystemTable<Boot>) -> Option<u64> {
         }
     }
     None
+}
+
+fn print_hex(system_table: &mut SystemTable<Boot>, value: u64) {
+    let hex_chars = b"0123456789ABCDEF";
+    for i in (0..16).rev() {
+        let digit = ((value >> (i * 4)) & 0xF) as usize;
+        let ch = hex_chars[digit] as char;
+        system_table.stdout().write_char(ch).unwrap();
+    }
 }
