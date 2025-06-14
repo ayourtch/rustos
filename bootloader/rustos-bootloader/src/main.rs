@@ -151,19 +151,31 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
         .exit_boot_services(MemoryType::LOADER_DATA);
     
     // At this point, we can't use stdout anymore
-    // Let's try a very simple test first - just write to VGA text buffer
+    // Now try to write to the framebuffer with expanded identity mapping
     unsafe {
-        // Try VGA text mode first
-        *(0xb8000 as *mut u16) = 0x4F52; // 'R' in white on red background
-        *(0xb8002 as *mut u16) = 0x4F45; // 'E' in white on red background
-        *(0xb8004 as *mut u16) = 0x4F44; // 'D' in white on red background
+        // Get framebuffer info from our boot_info
+        let boot_info_ref = &*(boot_info_addr as *const BootInfo);
+        let fb_addr = boot_info_ref.framebuffer.addr as *mut u32;
+        let fb_width = boot_info_ref.framebuffer.width;
+        
+        // Draw a red rectangle in top-left corner
+        for y in 0..100 {
+            for x in 0..200 {
+                let pixel_offset = (y * fb_width + x) as isize;
+                *fb_addr.offset(pixel_offset) = 0xFF0000; // Red
+            }
+        }
+        
+        // Small delay to make it visible
+        for _ in 0..50000000 {
+            core::arch::asm!("nop");
+        }
     }
     
-    // Infinite loop instead of jumping to kernel for now
-    loop {
-        unsafe {
-            core::arch::asm!("hlt");
-        }
+    // Jump to kernel
+    unsafe {
+        let kernel_entry: extern "C" fn(*const BootInfo) -> ! = mem::transmute(entry_point);
+        kernel_entry(boot_info_addr as *const BootInfo);
     }
 }
 
@@ -354,32 +366,63 @@ fn setup_identity_mapping(boot_services: &BootServices) -> Result<(), &'static s
         1,
     ).map_err(|_| "Failed to allocate PDPT")?;
     
-    let pd_addr = boot_services.allocate_pages(
+    // Allocate more PD pages to cover more memory
+    let pd0_addr = boot_services.allocate_pages(
         uefi::table::boot::AllocateType::AnyPages,
         MemoryType::LOADER_DATA,
         1,
-    ).map_err(|_| "Failed to allocate PD")?;
+    ).map_err(|_| "Failed to allocate PD0")?;
+    
+    let pd1_addr = boot_services.allocate_pages(
+        uefi::table::boot::AllocateType::AnyPages,
+        MemoryType::LOADER_DATA,
+        1,
+    ).map_err(|_| "Failed to allocate PD1")?;
+    
+    let pd2_addr = boot_services.allocate_pages(
+        uefi::table::boot::AllocateType::AnyPages,
+        MemoryType::LOADER_DATA,
+        1,
+    ).map_err(|_| "Failed to allocate PD2")?;
+    
+    let pd3_addr = boot_services.allocate_pages(
+        uefi::table::boot::AllocateType::AnyPages,
+        MemoryType::LOADER_DATA,
+        1,
+    ).map_err(|_| "Failed to allocate PD3")?;
     
     unsafe {
         // Clear all page tables
         core::ptr::write_bytes(pml4_addr as *mut u8, 0, 0x1000);
         core::ptr::write_bytes(pdpt_addr as *mut u8, 0, 0x1000);
-        core::ptr::write_bytes(pd_addr as *mut u8, 0, 0x1000);
+        core::ptr::write_bytes(pd0_addr as *mut u8, 0, 0x1000);
+        core::ptr::write_bytes(pd1_addr as *mut u8, 0, 0x1000);
+        core::ptr::write_bytes(pd2_addr as *mut u8, 0, 0x1000);
+        core::ptr::write_bytes(pd3_addr as *mut u8, 0, 0x1000);
         
         let pml4 = &mut *(pml4_addr as *mut PageTable);
         let pdpt = &mut *(pdpt_addr as *mut PageTable);
-        let pd = &mut *(pd_addr as *mut PageTable);
+        let pd0 = &mut *(pd0_addr as *mut PageTable);
+        let pd1 = &mut *(pd1_addr as *mut PageTable);
+        let pd2 = &mut *(pd2_addr as *mut PageTable);
+        let pd3 = &mut *(pd3_addr as *mut PageTable);
         
         // Set up PML4[0] -> PDPT
         pml4.set_entry(0, pdpt_addr, PAGE_PRESENT | PAGE_WRITABLE);
         
-        // Set up PDPT[0] -> PD
-        pdpt.set_entry(0, pd_addr, PAGE_PRESENT | PAGE_WRITABLE);
+        // Set up PDPT entries to cover first 4GB
+        pdpt.set_entry(0, pd0_addr, PAGE_PRESENT | PAGE_WRITABLE); // 0-1GB
+        pdpt.set_entry(1, pd1_addr, PAGE_PRESENT | PAGE_WRITABLE); // 1-2GB
+        pdpt.set_entry(2, pd2_addr, PAGE_PRESENT | PAGE_WRITABLE); // 2-3GB
+        pdpt.set_entry(3, pd3_addr, PAGE_PRESENT | PAGE_WRITABLE); // 3-4GB
         
-        // Set up PD entries for first 1GB (512 * 2MB pages)
-        for i in 0..512 {
-            let addr = i as u64 * 0x20_0000; // 2MB pages
-            pd.set_entry(i, addr, PAGE_PRESENT | PAGE_WRITABLE | PAGE_HUGE);
+        // Set up PD entries for first 4GB (4 * 512 * 2MB pages)
+        let mut pds = [pd0, pd1, pd2, pd3];
+        for (pdpt_entry, pd) in pds.iter_mut().enumerate() {
+            for pd_entry in 0..512 {
+                let addr = (pdpt_entry as u64 * 0x4000_0000) + (pd_entry as u64 * 0x20_0000); // 2MB pages
+                pd.set_entry(pd_entry, addr, PAGE_PRESENT | PAGE_WRITABLE | PAGE_HUGE);
+            }
         }
         
         // Load CR3 register
