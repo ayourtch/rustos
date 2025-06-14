@@ -58,7 +58,7 @@ pub extern "C" fn _start(framebuffer_info: *const FramebufferInfo) -> ! {
             for i in 0..width_dots {
                 for y in 170..180 {
                     for x in (i*10)..(i*10+8) {
-                        let pixel_offset = (y * width + x) as isize;
+                        let pixel_offset = (y * width + x as u32) as isize;
                         *fb_addr.offset(pixel_offset) = 0xFFFF8000; // Orange dots
                     }
                 }
@@ -69,7 +69,7 @@ pub extern "C" fn _start(framebuffer_info: *const FramebufferInfo) -> ! {
             for i in 0..height_dots {
                 for y in 190..200 {
                     for x in (i*10)..(i*10+8) {
-                        let pixel_offset = (y * width + x) as isize;
+                        let pixel_offset = (y * width + x as u32) as isize;
                         *fb_addr.offset(pixel_offset) = 0xFFFF00FF; // Pink dots
                     }
                 }
@@ -89,7 +89,7 @@ pub extern "C" fn _start(framebuffer_info: *const FramebufferInfo) -> ! {
                 
                 for y in 210..220 {
                     for x in (i*20)..(i*20+18) {
-                        let pixel_offset = (y * width + x) as isize;
+                        let pixel_offset = (y * width + x as u32) as isize;
                         *fb_addr.offset(pixel_offset) = color;
                     }
                 }
@@ -108,7 +108,7 @@ pub extern "C" fn _start(framebuffer_info: *const FramebufferInfo) -> ! {
                 
                 for y in 230..240 {
                     for x in (i*20)..(i*20+18) {
-                        let pixel_offset = (y * width + x) as isize;
+                        let pixel_offset = (y * width + x as u32) as isize;
                         *fb_addr.offset(pixel_offset) = color;
                     }
                 }
