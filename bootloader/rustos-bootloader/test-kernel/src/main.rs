@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+
 // Simple 8x8 bitmap font data
 const FONT_DATA: [[u8; 8]; 128] = [
     // 0x00-0x1F: Control characters (all zeros)
@@ -160,6 +161,26 @@ unsafe fn draw_string(fb_addr: *mut u32, width: u32, x: u32, y: u32, s: &str, co
     }
 }
 
+unsafe fn draw_u64(fb_addr: *mut u32, width: u32, x: u32, y: u32, number: u64, color: u32) {
+    let mut current_x = x;
+    draw_char(fb_addr, width, current_x, y, b'0', color);
+    current_x += 8;
+    draw_char(fb_addr, width, current_x, y, b'x', color);
+    current_x += 8;
+    for i in 0..16 {
+        let nibble = (number >> ((15 - i) * 4)) & 0xf;
+        let nibble = nibble as u8;
+        let ch = match nibble {
+           0..=9 => (b'0' + nibble),     // For 0-9, convert directly from ASCII '0'
+           10..=15 => (b'a' + (nibble - 10)), // For 10-15, convert to 'a'-'f'
+        _ => unreachable!(), // This case should never be reached with a valid nibble
+        };
+        draw_char(fb_addr, width, current_x, y, ch, color);
+        current_x += 8;
+    }
+}
+
+
 unsafe fn draw_number(fb_addr: *mut u32, width: u32, x: u32, y: u32, mut num: u32, color: u32) {
     if num == 0 {
         draw_char(fb_addr, width, x, y, b'0', color);
@@ -184,8 +205,42 @@ unsafe fn draw_number(fb_addr: *mut u32, width: u32, x: u32, y: u32, mut num: u3
     }
 }
 
+const PAGE_PRESENT: u64 = 1 << 0;
+const PAGE_WRITABLE: u64 = 1 << 1;
+const PAGE_HUGE: u64 = 1 << 7;
+
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct BootInfo {
+    pub memory_map: MemoryMapInfo,
+    pub framebuffer: FramebufferInfo,
+    pub rsdp_addr: Option<u64>,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct MemoryMapInfo {
+    pub entries: *const u8, // just opaque for now rather than MemoryDescriptor,
+    pub entry_count: usize,
+    pub entry_size: usize,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct FramebufferInfo {
+    pub addr: u64,
+    pub width: u32,
+    pub height: u32,
+    pub pitch: u32,
+    pub bpp: u32,
+    pub red_mask: u32,
+    pub green_mask: u32,
+    pub blue_mask: u32,
+}
+
 #[no_mangle]
-pub extern "C" fn _start() -> ! {
+pub extern "C" fn _start(boot_info: *const BootInfo) -> ! {
+
     unsafe {
         let fb_addr = 0x80000000 as *mut u32;
         let width = 2048u32;
@@ -204,9 +259,11 @@ pub extern "C" fn _start() -> ! {
             draw_string(fb_addr, width, 10, 30, "Bootloader Success!", 0xFF00FF00); // Green text
             draw_string(fb_addr, width, 10, 50, "Counter: ", 0xFF00FFFF); // Cyan text
             draw_number(fb_addr, width, 90, 50, counter, 0xFF00FFFF); // Cyan number
-            
+
+
             // Draw some dynamic info
-            draw_string(fb_addr, width, 10, 70, "Framebuffer: 0x80000000", 0xFFFF00FF); // Magenta
+            draw_string(fb_addr, width, 10, 70, "Fb addr:", 0xFFFF00FF); // Magenta
+            draw_u64(fb_addr, width, 10 + 128, 70, (*boot_info).framebuffer.addr , 0xFFFF00FF); // Magenta
             draw_string(fb_addr, width, 10, 90, "Resolution: 2048x2048", 0xFFFFFF00); // Yellow
             
             counter += 1;
