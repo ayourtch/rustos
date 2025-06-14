@@ -1,0 +1,45 @@
+cd test-kernel
+
+# Create the white screen kernel
+cat > white-kernel.s << 'EOF'
+.section .text
+.global _start
+
+_start:
+    # Paint entire framebuffer white
+    # Framebuffer is at 0x80000000, size is 2048x2048 = 4,194,304 pixels
+    # Each pixel is 4 bytes (32-bit), so total size is 16,777,216 bytes
+    
+    mov $0x80000000, %rdi     # Framebuffer address
+    mov $0xFFFFFFFF, %eax     # White color (0xFFFFFFFF)
+    mov $4194304, %rcx        # Number of pixels (2048 * 2048)
+    
+    # Fill framebuffer with white pixels
+fill_loop:
+    movl %eax, (%rdi)         # Write white pixel
+    add $4, %rdi              # Move to next pixel
+    dec %rcx                  # Decrement counter
+    jnz fill_loop             # Continue if not zero
+    
+    # Infinite loop
+halt_loop:
+    hlt
+    jmp halt_loop
+EOF
+
+# Build it
+as --64 -o white-kernel.o white-kernel.s
+ld -T simple.ld -o white-kernel white-kernel.o
+
+cd ..
+cp test-kernel/white-kernel esp/kernel.elf
+
+# Test
+cargo build --target x86_64-unknown-uefi
+cp target/x86_64-unknown-uefi/debug/rustos-bootloader.efi esp/EFI/BOOT/BOOTX64.EFI
+
+qemu-system-x86_64 \
+    -m 256M \
+    -bios /usr/share/ovmf/OVMF.fd \
+    -drive format=raw,file=fat:rw:esp \
+    -net none
