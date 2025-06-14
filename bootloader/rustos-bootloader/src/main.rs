@@ -325,6 +325,9 @@ fn parse_elf_and_load(elf_data: &[u8], boot_services: &BootServices) -> Result<u
     let ph_entry_size = u16::from_le_bytes([elf_data[54], elf_data[55]]) as usize;
     let ph_num = u16::from_le_bytes([elf_data[56], elf_data[57]]) as usize;
     
+    // Debug: Print program header info
+    // We can't use system_table here, so we'll just load segments and debug later
+    
     // Load program segments
     for i in 0..ph_num {
         let ph_start = ph_offset + i * ph_entry_size;
@@ -353,29 +356,31 @@ fn parse_elf_and_load(elf_data: &[u8], boot_services: &BootServices) -> Result<u
                 ph[40], ph[41], ph[42], ph[43], ph[44], ph[45], ph[46], ph[47],
             ]) as usize;
             
+            // Skip empty segments
+            if p_memsz == 0 {
+                continue;
+            }
+            
             // Allocate pages for this segment
             let pages_needed = (p_memsz + 0xFFF) / 0x1000;
             
-            // Try to allocate at the requested virtual address first
-            let segment_addr = match boot_services.allocate_pages(
+            // Always try to allocate at the exact virtual address - this is critical!
+            let segment_addr = boot_services.allocate_pages(
                 uefi::table::boot::AllocateType::Address(p_vaddr),
                 MemoryType::LOADER_DATA,
                 pages_needed,
-            ) {
-                Ok(addr) => addr,
-                Err(_) => {
-                    // If that fails, allocate anywhere and we'll need to update the mapping
-                    boot_services.allocate_pages(
-                        uefi::table::boot::AllocateType::AnyPages,
-                        MemoryType::LOADER_DATA,
-                        pages_needed,
-                    ).map_err(|_| "Failed to allocate segment memory anywhere")?
-                }
-            };
+            ).map_err(|_| "Failed to allocate segment at required address")?;
+            
+            // Verify we got the address we requested
+            if segment_addr != p_vaddr {
+                return Err("Segment not loaded at correct address");
+            }
             
             // Copy segment data
             unsafe {
                 let dest = segment_addr as *mut u8;
+                
+                // Copy file data if any
                 if p_filesz > 0 && p_offset + p_filesz <= elf_data.len() {
                     core::ptr::copy_nonoverlapping(
                         elf_data.as_ptr().add(p_offset),
@@ -383,7 +388,8 @@ fn parse_elf_and_load(elf_data: &[u8], boot_services: &BootServices) -> Result<u
                         p_filesz,
                     );
                 }
-                // Zero remaining bytes
+                
+                // Zero remaining bytes (BSS section)
                 if p_memsz > p_filesz {
                     core::ptr::write_bytes(dest.add(p_filesz), 0, p_memsz - p_filesz);
                 }
