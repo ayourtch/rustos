@@ -37,8 +37,8 @@ pub extern "C" fn _start(boot_info: *const BootInfo) -> ! {
         // First, test if we can access the parameter at all
         // Start with hardcoded values as fallback
         let mut fb_addr = 0x80000000 as *mut u32;
-        let mut width = 2048u32;
-        let mut height = 2048u32;
+        let mut width:usize = 2048u32 as usize;
+        let mut height:usize = 2048u32 as usize;
         
         // Draw a blue rectangle to show we started
         for y in 0..100 {
@@ -72,11 +72,10 @@ pub extern "C" fn _start(boot_info: *const BootInfo) -> ! {
             // Try to use framebuffer info from boot_info
             let fb_info = &boot_info_ref.framebuffer;
             
-            // Let's visualize the framebuffer values by drawing patterns
-            // We'll use the position and size of rectangles to show the values
+            // Let's visualize the actual values by drawing patterns
+            // We'll draw rectangles whose size represents the values
             
             // Show fb_info.addr by drawing rectangles (each bit represented)
-            // Draw dots to show if addr is non-zero
             if fb_info.addr != 0 {
                 // Draw cyan rectangle to show addr is non-zero
                 for y in 300..350 {
@@ -87,24 +86,61 @@ pub extern "C" fn _start(boot_info: *const BootInfo) -> ! {
                 }
             }
             
-            // Show width by drawing rectangles
-            if fb_info.width > 0 && fb_info.width < 10000 { // Reasonable width
-                // Draw orange rectangle to show width is reasonable
-                for y in 350..400 {
-                    for x in 0..100 {
-                        let pixel_offset = (y * width + x) as isize;
-                        *fb_addr.offset(pixel_offset) = 0xFFFF8000; // Orange - width reasonable
+            // Visualize width by drawing dots - each dot represents 256 pixels of width
+            let width_dots = (fb_info.width / 256).min(50); // Max 50 dots
+            for i in 0..width_dots {
+                for y in 350..370 {
+                    for x in (i*4)..(i*4+3) {
+                        if x < 200 {
+                            let pixel_offset = (y * width + x as usize) as isize;
+                            *fb_addr.offset(pixel_offset) = 0xFFFF8000; // Orange dots for width
+                        }
                     }
                 }
             }
             
-            // Show height
-            if fb_info.height > 0 && fb_info.height < 10000 { // Reasonable height
-                // Draw pink rectangle to show height is reasonable
-                for y in 400..450 {
-                    for x in 0..100 {
-                        let pixel_offset = (y * width + x) as isize;
-                        *fb_addr.offset(pixel_offset) = 0xFFFF80FF; // Pink - height reasonable
+            // Visualize height by drawing dots - each dot represents 256 pixels of height  
+            let height_dots = (fb_info.height / 256).min(50) as usize; // Max 50 dots
+            for i in 0..height_dots {
+                for y in 380..400 {
+                    for x in (i*4)..(i*4+3) {
+                        if x < 200 {
+                            let pixel_offset = (y * width + x) as isize;
+                            *fb_addr.offset(pixel_offset) = 0xFFFF80FF; // Pink dots for height
+                        }
+                    }
+                }
+            }
+            
+            // Show raw bytes of width and height as patterns
+            // Draw width bytes as colored squares
+            let width_bytes = fb_info.width.to_le_bytes();
+            for (i, &byte) in width_bytes.iter().enumerate() {
+                for bit in 0..8 {
+                    if (byte >> bit) & 1 != 0 {
+                        let x = 210 + i * 10 + bit;
+                        for y in 350..360 {
+                            if x < width {
+                                let pixel_offset = (y * width + x) as isize;
+                                *fb_addr.offset(pixel_offset) = 0xFFFFFF00; // Yellow bits for width
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Draw height bytes as colored squares  
+            let height_bytes = fb_info.height.to_le_bytes();
+            for (i, &byte) in height_bytes.iter().enumerate() {
+                for bit in 0..8 {
+                    if (byte >> bit) & 1 != 0 {
+                        let x = 210 + i * 10 + bit;
+                        for y in 370..380 {
+                            if x < width {
+                                let pixel_offset = (y * width + x) as isize;
+                                *fb_addr.offset(pixel_offset) = 0xFF00FF00; // Green bits for height
+                            }
+                        }
                     }
                 }
             }
@@ -114,8 +150,8 @@ pub extern "C" fn _start(boot_info: *const BootInfo) -> ! {
                && fb_info.width < 10000 && fb_info.height < 10000 {
                 // Update our values with boot_info values
                 fb_addr = fb_info.addr as *mut u32;
-                width = fb_info.width;
-                height = fb_info.height;
+                width = fb_info.width as usize;
+                height = fb_info.height as usize;
                 
                 // Draw magenta rectangle to show we're using boot_info framebuffer
                 for y in 450..500 {
@@ -128,7 +164,7 @@ pub extern "C" fn _start(boot_info: *const BootInfo) -> ! {
         }
         
         // Now do the normal gradient animation
-        let mut time = 0u32;
+        let mut time: usize = 0u32 as usize;
         loop {
             // Create a moving color gradient using the framebuffer info
             for y in 500..1000 { // Use lower part of screen for gradient

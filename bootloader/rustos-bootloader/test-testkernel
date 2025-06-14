@@ -13,7 +13,10 @@ cp target/x86_64-unknown-uefi/debug/rustos-bootloader.efi esp/EFI/BOOT/BOOTX64.E
 
 # Test
 qemu-system-x86_64 \
+    -enable-kvm \
     -m 256M \
     -bios /usr/share/ovmf/OVMF.fd \
     -drive format=raw,file=fat:rw:esp \
     -net none
+
+-nographic
