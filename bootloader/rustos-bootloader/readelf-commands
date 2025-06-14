@@ -1,0 +1,2 @@
+file esp/kernel.elf
+readelf -h esp/kernel.elf

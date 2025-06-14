@@ -4,6 +4,8 @@ target = "x86_64-unknown-none"
 [target.x86_64-unknown-none]
 rustflags = [
     "-C", "link-arg=-T", 
-    "-C", "link-arg=linker.ld",
-    "-C", "link-arg=--nmagic"
+    "-C", "link-arg=simple.ld",
+    "-C", "link-arg=--nmagic",
+    "-C", "relocation-model=static",
+    "-C", "link-arg=-no-pie"
 ]

@@ -101,7 +101,7 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
     // Debug: Print the entry point address
     system_table.stdout().write_str("Entry point: 0x").unwrap();
     print_hex(&mut system_table, entry_point);
-    system_table.stdout().write_str("\n").unwrap();
+    system_table.stdout().write_str(" (jumping to this address)\n").unwrap();
     
     // Set up identity mapping for first 1GB
     system_table.stdout().write_str("Setting up identity mapping...\n").unwrap();
