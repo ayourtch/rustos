@@ -373,31 +373,55 @@ fn parse_elf_and_load(elf_data: &[u8], boot_services: &BootServices) -> Result<u
             // Debug: Print what we're trying to load
             println!("Loading segment: vaddr=0x{:x}, filesz=0x{:x}, memsz=0x{:x}", p_vaddr, p_filesz, p_memsz);
             
-            // Try to allocate at the requested virtual address first
-            let segment_addr = match boot_services.allocate_pages(
+            // Always try to allocate at the exact virtual address - if it fails, we have a problem
+            let segment_addr = boot_services.allocate_pages(
                 uefi::table::boot::AllocateType::Address(p_vaddr),
                 MemoryType::LOADER_DATA,
                 pages_needed,
-            ) {
+            );
+            
+            let final_addr = match segment_addr {
                 Ok(addr) => {
                     println!("Allocated segment at requested address: 0x{:x}", addr);
                     addr
                 },
                 Err(_) => {
-                    // If that fails, allocate anywhere and we'll need to update the mapping
-                    let addr = boot_services.allocate_pages(
-                        uefi::table::boot::AllocateType::AnyPages,
-                        MemoryType::LOADER_DATA,
-                        pages_needed,
-                    ).map_err(|_| "Failed to allocate segment memory anywhere")?;
-                    println!("Allocated segment at fallback address: 0x{:x} (requested 0x{:x})", addr, p_vaddr);
-                    addr
+                    // If we can't allocate at the requested address, try to find a nearby address
+                    println!("Failed to allocate at 0x{:x}, trying alternative strategies", p_vaddr);
+                    
+                    // Strategy 1: Try addresses near the requested one
+                    let mut found_addr = None;
+                    for offset in (0..0x10000).step_by(0x1000) {
+                        if let Ok(addr) = boot_services.allocate_pages(
+                            uefi::table::boot::AllocateType::Address(p_vaddr + offset),
+                            MemoryType::LOADER_DATA,
+                            pages_needed,
+                        ) {
+                            found_addr = Some(addr);
+                            break;
+                        }
+                        if let Ok(addr) = boot_services.allocate_pages(
+                            uefi::table::boot::AllocateType::Address(p_vaddr.saturating_sub(offset)),
+                            MemoryType::LOADER_DATA,
+                            pages_needed,
+                        ) {
+                            found_addr = Some(addr);
+                            break;
+                        }
+                    }
+                    
+                    if let Some(addr) = found_addr {
+                        println!("Allocated segment at alternative address: 0x{:x}", addr);
+                        addr
+                    } else {
+                        return Err("Cannot find suitable address for kernel segment");
+                    }
                 }
             };
             
             // Copy segment data
             unsafe {
-                let dest = segment_addr as *mut u8;
+                let dest = final_addr as *mut u8;
                 if p_filesz > 0 && p_offset + p_filesz <= elf_data.len() {
                     core::ptr::copy_nonoverlapping(
                         elf_data.as_ptr().add(p_offset),
