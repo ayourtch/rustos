@@ -85,48 +85,18 @@ unsafe fn serial_write_u32(value: u32) {
 }
 
 #[no_mangle]
-pub extern "C" fn _start(boot_info: *const BootInfo) -> ! {
+pub extern "C" fn _start() -> ! {
     unsafe {
         // Simple serial debug - just one message
-        serial_write_str("KERNEL: Started\n");
+        serial_write_str("KERNEL: Started without params\n");
         
-        // Test 1: Draw purple rectangle to show we got here
+        // Test: Draw purple rectangle to show we got here
         let fb_addr = 0x80000000 as *mut u32;
         for i in 0..50000 {
             *fb_addr.offset(i) = 0xFFFF00FF; // Purple - kernel started
         }
         
-        // Test if boot_info is valid by checking if it's not null and not obviously bad
-        if !boot_info.is_null() && (boot_info as u64) < 0xFFFF_FFFF_0000_0000 {
-            serial_write_str("KERNEL: boot_info looks valid\n");
-            
-            let boot_info = &*boot_info;
-            
-            // Check if framebuffer address looks reasonable
-            if boot_info.framebuffer.addr == 0x80000000 && 
-               boot_info.framebuffer.width == 2048 && 
-               boot_info.framebuffer.height == 2048 {
-                
-                serial_write_str("KERNEL: framebuffer info correct\n");
-                
-                // Draw cyan rectangle in top-right to show boot_info works
-                let fb_addr = boot_info.framebuffer.addr as *mut u32;
-                let width = boot_info.framebuffer.width;
-                
-                for y in 0..100 {
-                    for x in (width-200)..width {
-                        let pixel_offset = (y * width + x) as isize;
-                        *fb_addr.offset(pixel_offset) = 0xFF00FFFF; // Cyan
-                    }
-                }
-                
-                serial_write_str("KERNEL: drew cyan rectangle\n");
-            } else {
-                serial_write_str("KERNEL: framebuffer info wrong\n");
-            }
-        } else {
-            serial_write_str("KERNEL: boot_info invalid\n");
-        }
+        serial_write_str("KERNEL: Drew purple, starting animation\n");
         
         // Simple animation without using boot_info
         let fb_addr = 0x80000000 as *mut u32;

@@ -102,17 +102,31 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
     print_hex(&mut system_table, entry_point);
     system_table.stdout().write_str(" (jumping to this address)\n").unwrap();
     
-    // Set up identity mapping for first 1GB
+    // Debug: Check if the entry point looks reasonable
+    if entry_point < 0x100000 || entry_point > 0x200000 {
+        system_table.stdout().write_str("WARNING: Entry point looks suspicious!\n").unwrap();
+    }
+    
+    // Debug: Try to read a few bytes from the entry point to see if they look like valid x86_64 code
+    unsafe {
+        let code_ptr = entry_point as *const u8;
+        system_table.stdout().write_str("Code at entry point: ").unwrap();
+        for i in 0..8 {
+            let byte = *code_ptr.offset(i);
+            print_hex_byte(&mut system_table, byte);
+            system_table.stdout().write_str(" ").unwrap();
+        }
+        system_table.stdout().write_str("\n").unwrap();
+    }
+    
+    // Set up identity mapping for first 4GB
     system_table.stdout().write_str("Setting up identity mapping...\n").unwrap();
     setup_identity_mapping(system_table.boot_services()).expect("Failed to setup identity mapping");
     
     // Get memory map before exiting boot services
     system_table.stdout().write_str("Getting memory map...\n").unwrap();
-    system_table.stdout().write_str("About to call get_memory_map\n").unwrap();
     let memory_map_info = get_memory_map(system_table.boot_services()).expect("Failed to get memory map");
     system_table.stdout().write_str("Memory map obtained successfully\n").unwrap();
-    system_table.stdout().write_str("Memory map has entries and continuing...\n").unwrap();
-    system_table.stdout().write_str("About to proceed to RSDP search...\n").unwrap();
     
     // Find RSDP
     system_table.stdout().write_str("Finding RSDP...\n").unwrap();
@@ -154,12 +168,11 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
     print_hex(&mut system_table, stack_top);
     system_table.stdout().write_str("\n").unwrap();
     
+    // Place BootInfo at allocated address
     system_table.stdout().write_str("Placing BootInfo at allocated address...\n").unwrap();
     unsafe {
         let boot_info_ptr = boot_info_addr as *mut BootInfo;
-        system_table.stdout().write_str("About to write BootInfo to memory...\n").unwrap();
         *boot_info_ptr = boot_info;
-        system_table.stdout().write_str("BootInfo write completed...\n").unwrap();
     }
     system_table.stdout().write_str("BootInfo placed successfully\n").unwrap();
     
@@ -169,7 +182,7 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
         .exit_boot_services(MemoryType::LOADER_DATA);
     
     // At this point, we can't use stdout anymore
-    // Now try to write to the framebuffer with expanded identity mapping
+    // Draw rectangles to show progress and then jump to kernel
     unsafe {
         // Get framebuffer info from our boot_info
         let boot_info_ref = &*(boot_info_addr as *const BootInfo);
@@ -188,15 +201,8 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
         for _ in 0..50000000 {
             core::arch::asm!("nop");
         }
-    }
-    
-    // Jump to kernel with proper stack setup
-    unsafe {
-        // Draw a blue rectangle before jumping to show we're about to call kernel
-        let boot_info_ref = &*(boot_info_addr as *const BootInfo);
-        let fb_addr = boot_info_ref.framebuffer.addr as *mut u32;
-        let fb_width = boot_info_ref.framebuffer.width;
         
+        // Draw the blue rectangle to show we're about to jump
         for y in 200..250 {
             for x in 0..200 {
                 let pixel_offset = (y * fb_width + x) as isize;
@@ -204,25 +210,14 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
             }
         }
         
-        // Small delay
-        for _ in 0..10000000 {
+        // Another delay
+        for _ in 0..50000000 {
             core::arch::asm!("nop");
         }
         
-        // Set up proper stack and jump to kernel
-        core::arch::asm!(
-            "mov rsp, {stack_top}",      // Set stack pointer
-            "and rsp, -16",              // Ensure 16-byte alignment
-            "sub rsp, 128",              // Reserve red zone + extra space
-            "xor rbp, rbp",              // Clear base pointer
-            "push rbp",                  // End of stack marker
-            "mov rbp, rsp",              // Set up stack frame
-            "call {kernel_entry}",       // Call kernel
-            stack_top = in(reg) stack_top,
-            kernel_entry = in(reg) entry_point,
-            in("rdi") boot_info_addr,    // First parameter (boot_info)
-            options(noreturn)
-        );
+        // Try the simplest possible jump - just transmute and call
+        let kernel_entry: extern "C" fn() -> ! = mem::transmute(entry_point);
+        kernel_entry();
     }
 }
 
@@ -553,4 +548,12 @@ fn print_decimal(system_table: &mut SystemTable<Boot>, mut value: u64) {
     for i in (0..count).rev() {
         system_table.stdout().write_char(digits[i] as char).unwrap();
     }
+}
+
+fn print_hex_byte(system_table: &mut SystemTable<Boot>, value: u8) {
+    let hex_chars = b"0123456789ABCDEF";
+    let high = (value >> 4) & 0xF;
+    let low = value & 0xF;
+    system_table.stdout().write_char(hex_chars[high as usize] as char).unwrap();
+    system_table.stdout().write_char(hex_chars[low as usize] as char).unwrap();
 }
