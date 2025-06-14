@@ -1,0 +1,14 @@
+[package]
+name = "minimal-test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+uefi = { version = "0.26", features = ["alloc", "global_allocator"] }
+uefi-services = "0.23"
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
