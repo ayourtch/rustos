@@ -1,0 +1,2 @@
+rustc --target x86_64-unknown-none --crate-type bin -C link-arg=-Tlinker.ld -C panic=abort -o ../../bootloader/rustos-bootloader/esp/kernel.elf src/simple-kernel.rs
+
