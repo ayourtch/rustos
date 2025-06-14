@@ -191,11 +191,9 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
             core::arch::asm!("nop");
         }
         
-        // Try different ways to jump to the kernel
-        
-        // Method 1: Try jumping without parameters first
-        let kernel_entry_no_params: extern "C" fn() -> ! = mem::transmute(entry_point);
-        kernel_entry_no_params();
+        // Try calling kernel WITH boot_info parameter
+        let kernel_entry_with_params: extern "C" fn(*const BootInfo) -> ! = mem::transmute(entry_point);
+        kernel_entry_with_params(boot_info_addr as *const BootInfo);
     }
 }
 
