@@ -2,6 +2,8 @@
 #![no_main]
 
 extern crate alloc;
+use uefi_services::println;
+
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -97,7 +99,7 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
     system_table.stdout().write_str("Parsing ELF...\n").unwrap();
     let entry_point = parse_elf_and_load(&kernel_data, system_table.boot_services()).expect("Failed to parse ELF");
     
-    // Debug: Print the entry point address
+    // Debug: Print the entry point address and where we loaded segments
     system_table.stdout().write_str("Entry point: 0x").unwrap();
     print_hex(&mut system_table, entry_point);
     system_table.stdout().write_str(" (jumping to this address)\n").unwrap();
@@ -368,20 +370,28 @@ fn parse_elf_and_load(elf_data: &[u8], boot_services: &BootServices) -> Result<u
             // Allocate pages for this segment
             let pages_needed = (p_memsz + 0xFFF) / 0x1000;
             
+            // Debug: Print what we're trying to load
+            println!("Loading segment: vaddr=0x{:x}, filesz=0x{:x}, memsz=0x{:x}", p_vaddr, p_filesz, p_memsz);
+            
             // Try to allocate at the requested virtual address first
             let segment_addr = match boot_services.allocate_pages(
                 uefi::table::boot::AllocateType::Address(p_vaddr),
                 MemoryType::LOADER_DATA,
                 pages_needed,
             ) {
-                Ok(addr) => addr,
+                Ok(addr) => {
+                    println!("Allocated segment at requested address: 0x{:x}", addr);
+                    addr
+                },
                 Err(_) => {
                     // If that fails, allocate anywhere and we'll need to update the mapping
-                    boot_services.allocate_pages(
+                    let addr = boot_services.allocate_pages(
                         uefi::table::boot::AllocateType::AnyPages,
                         MemoryType::LOADER_DATA,
                         pages_needed,
-                    ).map_err(|_| "Failed to allocate segment memory anywhere")?
+                    ).map_err(|_| "Failed to allocate segment memory anywhere")?;
+                    println!("Allocated segment at fallback address: 0x{:x} (requested 0x{:x})", addr, p_vaddr);
+                    addr
                 }
             };
             
