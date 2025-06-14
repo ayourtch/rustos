@@ -91,7 +91,7 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
     system_table.stdout().write_str("Entry point: 0x").unwrap();
     print_hex(&mut system_table, entry_point);
     system_table.stdout().write_str("\n").unwrap();
-
+    
     // Set up identity mapping for first 1GB
     system_table.stdout().write_str("Setting up identity mapping...\n").unwrap();
     setup_identity_mapping(system_table.boot_services()).expect("Failed to setup identity mapping");
@@ -144,8 +144,16 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
     unsafe {
         // Write a magic value to indicate we're about to jump
         *(0xb8000 as *mut u16) = 0x0F42; // 'B' in white on black (VGA text mode)
+        *(0xb8002 as *mut u16) = 0x0F4F; // 'O' in white on black (VGA text mode)
+        *(0xb8004 as *mut u16) = 0x0F4F; // 'O' in white on black (VGA text mode)
+        *(0xb8006 as *mut u16) = 0x0F54; // 'T' in white on black (VGA text mode)
     }
-
+    
+    // Small delay to ensure VGA write completes
+    for _ in 0..1000000 {
+        unsafe { core::arch::asm!("nop"); }
+    }
+    
     // Jump to kernel
     unsafe {
         let kernel_entry: extern "C" fn(*const BootInfo) -> ! = mem::transmute(entry_point);
