@@ -139,19 +139,26 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
     let (_runtime_system_table, _memory_map) = system_table
         .exit_boot_services(MemoryType::LOADER_DATA);
     
-    // At this point, we can't use stdout anymore, but we can try to jump to kernel
-    // Let's try to signal that we're about to jump by writing to a memory location
+    // At this point, we can't use stdout anymore
+    // Let's try to write directly to the framebuffer instead of VGA text
     unsafe {
-        // Write a magic value to indicate we're about to jump
-        *(0xb8000 as *mut u16) = 0x0F42; // 'B' in white on black (VGA text mode)
-        *(0xb8002 as *mut u16) = 0x0F4F; // 'O' in white on black (VGA text mode)
-        *(0xb8004 as *mut u16) = 0x0F4F; // 'O' in white on black (VGA text mode)
-        *(0xb8006 as *mut u16) = 0x0F54; // 'T' in white on black (VGA text mode)
-    }
-    
-    // Small delay to ensure VGA write completes
-    for _ in 0..1000000 {
-        unsafe { core::arch::asm!("nop"); }
+        // Get framebuffer info from our boot_info before we pass it to kernel
+        let boot_info_ref = &*(boot_info_addr as *const BootInfo);
+        let fb_addr = boot_info_ref.framebuffer.addr as *mut u32;
+        let fb_width = boot_info_ref.framebuffer.width;
+        
+        // Draw a red rectangle in top-left corner to show bootloader reached this point
+        for y in 0..50 {
+            for x in 0..100 {
+                let pixel_offset = (y * fb_width + x) as isize;
+                *fb_addr.offset(pixel_offset) = 0xFF0000; // Red
+            }
+        }
+        
+        // Small delay
+        for _ in 0..10000000 {
+            core::arch::asm!("nop");
+        }
     }
     
     // Jump to kernel

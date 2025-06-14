@@ -30,8 +30,11 @@ pub struct FramebufferInfo {
 
 #[no_mangle]
 pub extern "C" fn _start(_boot_info: *const BootInfo) -> ! {
-    // Write to VGA text mode buffer to show we're alive
     unsafe {
+        // Write to serial port (COM1) for debug output
+        serial_write_string("KERNEL STARTED!\n");
+        
+        // Write to VGA text mode buffer to show we're alive
         let vga_buffer = 0xb8000 as *mut u16;
         
         // Write "KERNEL OK!" to VGA text buffer
@@ -40,9 +43,15 @@ pub extern "C" fn _start(_boot_info: *const BootInfo) -> ! {
             *vga_buffer.offset(i as isize) = (byte as u16) | 0x0F00; // White on black
         }
         
+        serial_write_string("VGA TEXT WRITTEN\n");
+        
         // Flash dots to show continuous execution
         let mut counter = 0u32;
         loop {
+            if counter % 1000000 == 0 {
+                serial_write_string("KERNEL LOOP\n");
+            }
+            
             // Write a dot that changes position
             let pos = 10 + (counter / 100000) % 70;
             *vga_buffer.offset(pos as isize) = 0x0F2E; // White dot
@@ -52,8 +61,8 @@ pub extern "C" fn _start(_boot_info: *const BootInfo) -> ! {
             // Clear previous dot
             if counter % 100000 == 0 {
                 for i in 10..80 {
-                    if i != pos {
-                        *vga_buffer.offset(i as isize) = 0x0F20; // Space
+                    if i != pos as isize {
+                        *vga_buffer.offset(i) = 0x0F20; // Space
                     }
                 }
             }
@@ -64,6 +73,33 @@ pub extern "C" fn _start(_boot_info: *const BootInfo) -> ! {
             }
         }
     }
+}
+
+unsafe fn serial_write_string(s: &str) {
+    for byte in s.bytes() {
+        serial_write_byte(byte);
+    }
+}
+
+unsafe fn serial_write_byte(byte: u8) {
+    // COM1 port 0x3F8
+    const SERIAL_PORT: u16 = 0x3F8;
+    
+    // Wait for transmit buffer to be empty
+    while (inb(SERIAL_PORT + 5) & 0x20) == 0 {}
+    
+    // Send the byte
+    outb(SERIAL_PORT, byte);
+}
+
+unsafe fn outb(port: u16, value: u8) {
+    core::arch::asm!("out dx, al", in("dx") port, in("al") value, options(nomem, nostack));
+}
+
+unsafe fn inb(port: u16) -> u8 {
+    let value: u8;
+    core::arch::asm!("in al, dx", out("al") value, in("dx") port, options(nomem, nostack));
+    value
 }
 
 #[panic_handler]

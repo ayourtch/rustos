@@ -1,0 +1,34 @@
+cd ../test-kernel
+
+# Create the minimal assembly kernel
+cat > minimal-kernel.s << 'EOF'
+.section .text
+.global _start
+
+_start:
+    # Write "OK!" to VGA text buffer at 0xb8000
+    mov $0xb8000, %rdi
+    movw $0x0F4F, (%rdi)     # 'O' in white
+    movw $0x0F4B, 2(%rdi)    # 'K' in white  
+    movw $0x0F21, 4(%rdi)    # '!' in white
+    
+    # Infinite loop
+halt_loop:
+    hlt
+    jmp halt_loop
+EOF
+
+# Build it
+as --64 -o minimal-kernel.o minimal-kernel.s
+ld -T linker.ld -o minimal-kernel minimal-kernel.o
+
+cp ../test-kernel/minimal-kernel ../../bootloader/rustos-bootloader/esp/kernel.elf
+
+cd ../../bootloader/rustos-bootloader/
+# Test it
+qemu-system-x86_64 \
+    -m 256M \
+    -bios /usr/share/ovmf/OVMF.fd \
+    -drive format=raw,file=fat:rw:esp \
+    -net none \
+    -vga std
