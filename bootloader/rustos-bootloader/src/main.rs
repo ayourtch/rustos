@@ -191,9 +191,14 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
             core::arch::asm!("nop");
         }
         
-        // Try calling kernel WITH boot_info parameter
-        let kernel_entry_with_params: extern "C" fn(*const BootInfo) -> ! = mem::transmute(entry_point);
-        kernel_entry_with_params(boot_info_addr as *const BootInfo);
+        // For debugging, let's try passing just the framebuffer info
+        let kernel_entry_fb_only: extern "C" fn(*const FramebufferInfo) -> ! = mem::transmute(entry_point);
+        
+        // Get the framebuffer info from boot_info  
+        let boot_info_ref = &*(boot_info_addr as *const BootInfo);
+        let fb_info_ptr = &boot_info_ref.framebuffer as *const FramebufferInfo;
+        
+        kernel_entry_fb_only(fb_info_ptr);
     }
 }
 

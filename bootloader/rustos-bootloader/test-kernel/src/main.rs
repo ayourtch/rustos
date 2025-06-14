@@ -1,189 +1,134 @@
 #![no_std]
 #![no_main]
 
-// BootInfo structures - must match bootloader exactly
-#[repr(C)]
-#[derive(Debug, Clone)]
-pub struct BootInfo {
-    pub memory_map: MemoryMapInfo,
-    pub framebuffer: FramebufferInfo,
-    pub rsdp_addr: Option<u64>,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone)]
-pub struct MemoryMapInfo {
-    pub entries: *const u8, // We'll just treat as opaque for now
-    pub entry_count: usize,
-    pub entry_size: usize,
-}
-
+// Let's start with just testing the framebuffer info directly
 #[repr(C)]
 #[derive(Debug, Clone)]
 pub struct FramebufferInfo {
-    pub addr: u64,
-    pub width: u32,
-    pub height: u32,
-    pub pitch: u32,
-    pub bpp: u32,
-    pub red_mask: u32,
-    pub green_mask: u32,
-    pub blue_mask: u32,
+    pub addr: u64,     // 8 bytes
+    pub width: u32,    // 4 bytes  
+    pub height: u32,   // 4 bytes
+    pub pitch: u32,    // 4 bytes
+    pub bpp: u32,      // 4 bytes
+    pub red_mask: u32,   // 4 bytes
+    pub green_mask: u32, // 4 bytes  
+    pub blue_mask: u32,  // 4 bytes
 }
 
 #[no_mangle]
-pub extern "C" fn _start(boot_info: *const BootInfo) -> ! {
+pub extern "C" fn _start(framebuffer_info: *const FramebufferInfo) -> ! {
     unsafe {
-        // First, test if we can access the parameter at all
-        // Start with hardcoded values as fallback
-        let mut fb_addr = 0x80000000 as *mut u32;
-        let mut width:usize = 2048u32 as usize;
-        let mut height:usize = 2048u32 as usize;
+        // Use hardcoded values as fallback
+        let fb_addr = 0x80000000 as *mut u32;
+        let width = 2048u32;
         
-        // Draw a blue rectangle to show we started
+        // Draw blue rectangle to show we started
         for y in 0..100 {
             for x in 0..200 {
                 let pixel_offset = (y * width + x) as isize;
-                *fb_addr.offset(pixel_offset) = 0xFF0000FF; // Blue - we started
+                *fb_addr.offset(pixel_offset) = 0xFF0000FF; // Blue
             }
         }
         
-        // Try to access boot_info parameter
-        if !boot_info.is_null() {
-            // Draw green rectangle to show boot_info is not null
-            for y in 100..200 {
-                for x in 0..200 {
+        if !framebuffer_info.is_null() {
+            let fb_info = &*framebuffer_info;
+            
+            // Draw green if not null
+            for y in 100..150 {
+                for x in 0..100 {
                     let pixel_offset = (y * width + x) as isize;
-                    *fb_addr.offset(pixel_offset) = 0xFF00FF00; // Green - boot_info not null
+                    *fb_addr.offset(pixel_offset) = 0xFF00FF00; // Green
                 }
             }
             
-            // Try to dereference boot_info
-            let boot_info_ref = &*boot_info;
-            
-            // Draw yellow rectangle to show we can dereference
-            for y in 200..300 {
-                for x in 0..200 {
-                    let pixel_offset = (y * width + x) as isize;
-                    *fb_addr.offset(pixel_offset) = 0xFFFFFF00; // Yellow - can dereference
-                }
-            }
-            
-            // Try to use framebuffer info from boot_info
-            let fb_info = &boot_info_ref.framebuffer;
-            
-            // Let's visualize the actual values by drawing patterns
-            // We'll draw rectangles whose size represents the values
-            
-            // Show fb_info.addr by drawing rectangles (each bit represented)
-            if fb_info.addr != 0 {
-                // Draw cyan rectangle to show addr is non-zero
-                for y in 300..350 {
-                    for x in 0..100 {
+            // Test each field individually
+            // Show addr as cyan dots (each dot = 1GB)
+            let addr_gb = (fb_info.addr / 0x40000000) as u32; // Divide by 1GB
+            for i in 0..addr_gb.min(10) {
+                for y in 150..160 {
+                    for x in (i*10)..(i*10+8) {
                         let pixel_offset = (y * width + x) as isize;
-                        *fb_addr.offset(pixel_offset) = 0xFF00FFFF; // Cyan - addr non-zero
+                        *fb_addr.offset(pixel_offset) = 0xFF00FFFF; // Cyan dots
                     }
                 }
             }
             
-            // Visualize width by drawing dots - each dot represents 256 pixels of width
-            let width_dots = (fb_info.width / 256).min(50); // Max 50 dots
+            // Show width as orange dots (each dot = 256 pixels)
+            let width_dots = (fb_info.width / 256).min(20);
             for i in 0..width_dots {
-                for y in 350..370 {
-                    for x in (i*4)..(i*4+3) {
-                        if x < 200 {
-                            let pixel_offset = (y * width + x as usize) as isize;
-                            *fb_addr.offset(pixel_offset) = 0xFFFF8000; // Orange dots for width
-                        }
+                for y in 170..180 {
+                    for x in (i*10)..(i*10+8) {
+                        let pixel_offset = (y * width + x) as isize;
+                        *fb_addr.offset(pixel_offset) = 0xFFFF8000; // Orange dots
                     }
                 }
             }
             
-            // Visualize height by drawing dots - each dot represents 256 pixels of height  
-            let height_dots = (fb_info.height / 256).min(50) as usize; // Max 50 dots
+            // Show height as pink dots (each dot = 256 pixels)  
+            let height_dots = (fb_info.height / 256).min(20);
             for i in 0..height_dots {
-                for y in 380..400 {
-                    for x in (i*4)..(i*4+3) {
-                        if x < 200 {
-                            let pixel_offset = (y * width + x) as isize;
-                            *fb_addr.offset(pixel_offset) = 0xFFFF80FF; // Pink dots for height
-                        }
+                for y in 190..200 {
+                    for x in (i*10)..(i*10+8) {
+                        let pixel_offset = (y * width + x) as isize;
+                        *fb_addr.offset(pixel_offset) = 0xFFFF00FF; // Pink dots
                     }
                 }
             }
             
-            // Show raw bytes of width and height as patterns
-            // Draw width bytes as colored squares
+            // Show the raw bytes of each field
+            // Width bytes
             let width_bytes = fb_info.width.to_le_bytes();
             for (i, &byte) in width_bytes.iter().enumerate() {
-                for bit in 0..8 {
-                    if (byte >> bit) & 1 != 0 {
-                        let x = 210 + i * 10 + bit;
-                        for y in 350..360 {
-                            if x < width {
-                                let pixel_offset = (y * width + x) as isize;
-                                *fb_addr.offset(pixel_offset) = 0xFFFFFF00; // Yellow bits for width
-                            }
-                        }
-                    }
-                }
-            }
-            
-            // Draw height bytes as colored squares  
-            let height_bytes = fb_info.height.to_le_bytes();
-            for (i, &byte) in height_bytes.iter().enumerate() {
-                for bit in 0..8 {
-                    if (byte >> bit) & 1 != 0 {
-                        let x = 210 + i * 10 + bit;
-                        for y in 370..380 {
-                            if x < width {
-                                let pixel_offset = (y * width + x) as isize;
-                                *fb_addr.offset(pixel_offset) = 0xFF00FF00; // Green bits for height
-                            }
-                        }
-                    }
-                }
-            }
-            
-            // If all values look good, try using them
-            if fb_info.addr != 0 && fb_info.width > 0 && fb_info.height > 0 
-               && fb_info.width < 10000 && fb_info.height < 10000 {
-                // Update our values with boot_info values
-                fb_addr = fb_info.addr as *mut u32;
-                width = fb_info.width as usize;
-                height = fb_info.height as usize;
+                let color = match byte {
+                    0 => 0xFF000000,      // Black for 0
+                    1..=63 => 0xFF0000FF,   // Blue for low values
+                    64..=127 => 0xFF00FF00, // Green for mid values  
+                    128..=191 => 0xFFFF8000, // Orange for high values
+                    192..=255 => 0xFFFF0000, // Red for very high values
+                };
                 
-                // Draw magenta rectangle to show we're using boot_info framebuffer
-                for y in 450..500 {
-                    for x in 0..200 {
+                for y in 210..220 {
+                    for x in (i*20)..(i*20+18) {
                         let pixel_offset = (y * width + x) as isize;
-                        *fb_addr.offset(pixel_offset) = 0xFFFF00FF; // Magenta - using boot_info fb
-                    }
-                }
-            }
-        }
-        
-        // Now do the normal gradient animation
-        let mut time: usize = 0u32 as usize;
-        loop {
-            // Create a moving color gradient using the framebuffer info
-            for y in 500..1000 { // Use lower part of screen for gradient
-                for x in 0..500 {
-                    if x < width && y < height {
-                        let pixel_offset = (y * width + x) as isize;
-                        
-                        let red = ((x + time) & 0xFF) as u32;
-                        let green = ((y + time) & 0xFF) as u32;
-                        let blue = (((x + y + time) / 2) & 0xFF) as u32;
-                        
-                        let color = (255 << 24) | (red << 16) | (green << 8) | blue;
                         *fb_addr.offset(pixel_offset) = color;
                     }
                 }
             }
             
+            // Height bytes  
+            let height_bytes = fb_info.height.to_le_bytes();
+            for (i, &byte) in height_bytes.iter().enumerate() {
+                let color = match byte {
+                    0 => 0xFF000000,      // Black for 0
+                    1..=63 => 0xFF0000FF,   // Blue for low values
+                    64..=127 => 0xFF00FF00, // Green for mid values
+                    128..=191 => 0xFFFF8000, // Orange for high values  
+                    192..=255 => 0xFFFF0000, // Red for very high values
+                };
+                
+                for y in 230..240 {
+                    for x in (i*20)..(i*20+18) {
+                        let pixel_offset = (y * width + x) as isize;
+                        *fb_addr.offset(pixel_offset) = color;
+                    }
+                }
+            }
+        }
+        
+        // Normal gradient at bottom
+        let mut time = 0u32;
+        loop {
+            for y in 400..600 {
+                for x in 0..400 {
+                    let pixel_offset = (y * width + x) as isize;
+                    let red = ((x + time) & 0xFF) as u32;
+                    let green = ((y + time) & 0xFF) as u32;
+                    let blue = (((x + y + time) / 2) & 0xFF) as u32;
+                    let color = (255 << 24) | (red << 16) | (green << 8) | blue;
+                    *fb_addr.offset(pixel_offset) = color;
+                }
+            }
             time = time.wrapping_add(1);
-            
             for _ in 0..50000 {
                 core::arch::asm!("nop");
             }
@@ -193,12 +138,5 @@ pub extern "C" fn _start(boot_info: *const BootInfo) -> ! {
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
-    // Paint screen red if panic
-    unsafe {
-        let fb_addr = 0x80000000 as *mut u32;
-        for i in 0..2048*2048 {
-            *fb_addr.offset(i) = 0xFFFF0000; // Red
-        }
-    }
     loop {}
 }
