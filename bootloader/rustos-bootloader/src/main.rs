@@ -4,7 +4,6 @@
 extern crate alloc;
 use uefi_services::println;
 
-
 use alloc::vec;
 use alloc::vec::Vec;
 use core::mem;
@@ -325,7 +324,7 @@ fn parse_elf_and_load(elf_data: &[u8], boot_services: &BootServices) -> Result<u
     }
     
     // Get entry point (at offset 24 for 64-bit ELF)
-    let entry_point = u64::from_le_bytes([
+    let original_entry_point = u64::from_le_bytes([
         elf_data[24], elf_data[25], elf_data[26], elf_data[27],
         elf_data[28], elf_data[29], elf_data[30], elf_data[31],
     ]);
@@ -339,7 +338,70 @@ fn parse_elf_and_load(elf_data: &[u8], boot_services: &BootServices) -> Result<u
     let ph_entry_size = u16::from_le_bytes([elf_data[54], elf_data[55]]) as usize;
     let ph_num = u16::from_le_bytes([elf_data[56], elf_data[57]]) as usize;
     
-    // Load program segments
+    // Calculate the total memory range needed
+    let mut min_addr = u64::MAX;
+    let mut max_addr = 0u64;
+    
+    // First pass: find the memory range
+    for i in 0..ph_num {
+        let ph_start = ph_offset + i * ph_entry_size;
+        if ph_start + 56 > elf_data.len() {
+            continue;
+        }
+        
+        let ph = &elf_data[ph_start..ph_start + 56];
+        let p_type = u32::from_le_bytes([ph[0], ph[1], ph[2], ph[3]]);
+        
+        // PT_LOAD = 1
+        if p_type == 1 {
+            let p_vaddr = u64::from_le_bytes([
+                ph[16], ph[17], ph[18], ph[19], ph[20], ph[21], ph[22], ph[23],
+            ]);
+            
+            let p_memsz = u64::from_le_bytes([
+                ph[40], ph[41], ph[42], ph[43], ph[44], ph[45], ph[46], ph[47],
+            ]);
+            
+            min_addr = min_addr.min(p_vaddr);
+            max_addr = max_addr.max(p_vaddr + p_memsz);
+        }
+    }
+    
+    if min_addr == u64::MAX {
+        return Err("No loadable segments found");
+    }
+    
+    println!("Total memory range needed: 0x{:x} to 0x{:x}", min_addr, max_addr);
+    
+    // Allocate one large contiguous block for all segments
+    let total_size = max_addr - min_addr;
+    let pages_needed = (total_size + 0xFFF) / 0x1000;
+    
+    let base_addr = match boot_services.allocate_pages(
+        uefi::table::boot::AllocateType::Address(min_addr),
+        MemoryType::LOADER_DATA,
+        pages_needed.try_into().unwrap(),
+    ) {
+        Ok(addr) => {
+            println!("Allocated contiguous block at requested address: 0x{:x}", addr);
+            addr
+        },
+        Err(_) => {
+            // Allocate anywhere and calculate relocation offset
+            let addr = boot_services.allocate_pages(
+                uefi::table::boot::AllocateType::AnyPages,
+                MemoryType::LOADER_DATA,
+                pages_needed.try_into().unwrap(),
+            ).map_err(|_| "Failed to allocate memory for kernel")?;
+            println!("Allocated contiguous block at fallback address: 0x{:x} (requested 0x{:x})", addr, min_addr);
+            addr
+        }
+    };
+    
+    let relocation_offset = base_addr as i64 - min_addr as i64;
+    println!("Relocation offset: 0x{:x}", relocation_offset);
+    
+    // Second pass: load segments into the allocated block
     for i in 0..ph_num {
         let ph_start = ph_offset + i * ph_entry_size;
         if ph_start + 56 > elf_data.len() {
@@ -367,77 +429,35 @@ fn parse_elf_and_load(elf_data: &[u8], boot_services: &BootServices) -> Result<u
                 ph[40], ph[41], ph[42], ph[43], ph[44], ph[45], ph[46], ph[47],
             ]) as usize;
             
-            // Allocate pages for this segment
-            let pages_needed = (p_memsz + 0xFFF) / 0x1000;
+            // Calculate actual load address
+            let load_addr = ((p_vaddr as i64 + relocation_offset) as u64) as *mut u8;
             
-            // Debug: Print what we're trying to load
-            println!("Loading segment: vaddr=0x{:x}, filesz=0x{:x}, memsz=0x{:x}", p_vaddr, p_filesz, p_memsz);
-            
-            // Always try to allocate at the exact virtual address - if it fails, we have a problem
-            let segment_addr = boot_services.allocate_pages(
-                uefi::table::boot::AllocateType::Address(p_vaddr),
-                MemoryType::LOADER_DATA,
-                pages_needed,
-            );
-            
-            let final_addr = match segment_addr {
-                Ok(addr) => {
-                    println!("Allocated segment at requested address: 0x{:x}", addr);
-                    addr
-                },
-                Err(_) => {
-                    // If we can't allocate at the requested address, try to find a nearby address
-                    println!("Failed to allocate at 0x{:x}, trying alternative strategies", p_vaddr);
-                    
-                    // Strategy 1: Try addresses near the requested one
-                    let mut found_addr = None;
-                    for offset in (0..0x10000).step_by(0x1000) {
-                        if let Ok(addr) = boot_services.allocate_pages(
-                            uefi::table::boot::AllocateType::Address(p_vaddr + offset),
-                            MemoryType::LOADER_DATA,
-                            pages_needed,
-                        ) {
-                            found_addr = Some(addr);
-                            break;
-                        }
-                        if let Ok(addr) = boot_services.allocate_pages(
-                            uefi::table::boot::AllocateType::Address(p_vaddr.saturating_sub(offset)),
-                            MemoryType::LOADER_DATA,
-                            pages_needed,
-                        ) {
-                            found_addr = Some(addr);
-                            break;
-                        }
-                    }
-                    
-                    if let Some(addr) = found_addr {
-                        println!("Allocated segment at alternative address: 0x{:x}", addr);
-                        addr
-                    } else {
-                        return Err("Cannot find suitable address for kernel segment");
-                    }
-                }
-            };
+            println!("Loading segment: vaddr=0x{:x} -> load_addr=0x{:x}, size=0x{:x}", 
+                     p_vaddr, load_addr as u64, p_memsz);
             
             // Copy segment data
             unsafe {
-                let dest = final_addr as *mut u8;
                 if p_filesz > 0 && p_offset + p_filesz <= elf_data.len() {
                     core::ptr::copy_nonoverlapping(
                         elf_data.as_ptr().add(p_offset),
-                        dest,
+                        load_addr,
                         p_filesz,
                     );
                 }
                 // Zero remaining bytes
                 if p_memsz > p_filesz {
-                    core::ptr::write_bytes(dest.add(p_filesz), 0, p_memsz - p_filesz);
+                    core::ptr::write_bytes(load_addr.add(p_filesz), 0, p_memsz - p_filesz);
                 }
             }
         }
     }
     
-    Ok(entry_point)
+    // Calculate the relocated entry point
+    let relocated_entry_point = (original_entry_point as i64 + relocation_offset) as u64;
+    println!("Original entry point: 0x{:x}, relocated to: 0x{:x}", 
+             original_entry_point, relocated_entry_point);
+    
+    Ok(relocated_entry_point)
 }
 
 fn setup_identity_mapping(boot_services: &BootServices) -> Result<(), &'static str> {
