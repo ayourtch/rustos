@@ -135,15 +135,18 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
         1, // 1 page should be enough for BootInfo
     ).expect("Failed to allocate BootInfo memory");
     
-    // Allocate memory for kernel stack (64KB = 16 pages)
+    // Allocate memory for kernel stack (1MB = 256 pages for safety)
     system_table.stdout().write_str("Allocating kernel stack...\n").unwrap();
-    let stack_pages = 16; // 64KB stack
+    let stack_pages = 256; // 1MB stack (much larger)
     let stack_bottom = system_table.boot_services().allocate_pages(
         uefi::table::boot::AllocateType::AnyPages,
         MemoryType::LOADER_DATA,
         stack_pages,
     ).expect("Failed to allocate kernel stack");
-    let stack_top = stack_bottom + (stack_pages as u64 * 0x1000); // Stack grows downward
+    
+    // Stack grows downward, so top = bottom + size
+    // Ensure 16-byte alignment
+    let stack_top = (stack_bottom + (stack_pages as u64 * 0x1000)) & !0xF;
     
     system_table.stdout().write_str("Stack allocated at: 0x").unwrap();
     print_hex(&mut system_table, stack_bottom);
@@ -209,9 +212,11 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
         // Set up proper stack and jump to kernel
         core::arch::asm!(
             "mov rsp, {stack_top}",      // Set stack pointer
-            "push rbp",                  // Set up stack frame
-            "mov rbp, rsp",
-            "sub rsp, 32",              // Red zone for System V ABI
+            "and rsp, -16",              // Ensure 16-byte alignment
+            "sub rsp, 128",              // Reserve red zone + extra space
+            "xor rbp, rbp",              // Clear base pointer
+            "push rbp",                  // End of stack marker
+            "mov rbp, rsp",              // Set up stack frame
             "call {kernel_entry}",       // Call kernel
             stack_top = in(reg) stack_top,
             kernel_entry = in(reg) entry_point,
