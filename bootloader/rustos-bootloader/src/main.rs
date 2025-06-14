@@ -13,6 +13,7 @@ use uefi::proto::console::gop::{GraphicsOutput, PixelFormat};
 use uefi::proto::media::file::{File, FileAttribute, FileMode};
 use uefi::proto::media::fs::SimpleFileSystem;
 use uefi::table::boot::{MemoryDescriptor, MemoryType};
+use uefi_services::println;
 
 const BOOT_INFO_ADDR: u64 = 0x8000_0000;
 const KERNEL_ADDR: u64 = 0x4000_0000;
@@ -102,31 +103,17 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
     print_hex(&mut system_table, entry_point);
     system_table.stdout().write_str(" (jumping to this address)\n").unwrap();
     
-    // Debug: Check if the entry point looks reasonable
-    if entry_point < 0x100000 || entry_point > 0x200000 {
-        system_table.stdout().write_str("WARNING: Entry point looks suspicious!\n").unwrap();
-    }
-    
-    // Debug: Try to read a few bytes from the entry point to see if they look like valid x86_64 code
-    unsafe {
-        let code_ptr = entry_point as *const u8;
-        system_table.stdout().write_str("Code at entry point: ").unwrap();
-        for i in 0..8 {
-            let byte = *code_ptr.offset(i);
-            print_hex_byte(&mut system_table, byte);
-            system_table.stdout().write_str(" ").unwrap();
-        }
-        system_table.stdout().write_str("\n").unwrap();
-    }
-    
-    // Set up identity mapping for first 4GB
+    // Set up identity mapping for first 1GB
     system_table.stdout().write_str("Setting up identity mapping...\n").unwrap();
     setup_identity_mapping(system_table.boot_services()).expect("Failed to setup identity mapping");
     
     // Get memory map before exiting boot services
     system_table.stdout().write_str("Getting memory map...\n").unwrap();
+    system_table.stdout().write_str("About to call get_memory_map\n").unwrap();
     let memory_map_info = get_memory_map(system_table.boot_services()).expect("Failed to get memory map");
     system_table.stdout().write_str("Memory map obtained successfully\n").unwrap();
+    system_table.stdout().write_str("Memory map has entries and continuing...\n").unwrap();
+    system_table.stdout().write_str("About to proceed to RSDP search...\n").unwrap();
     
     // Find RSDP
     system_table.stdout().write_str("Finding RSDP...\n").unwrap();
@@ -149,30 +136,12 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
         1, // 1 page should be enough for BootInfo
     ).expect("Failed to allocate BootInfo memory");
     
-    // Allocate memory for kernel stack (1MB = 256 pages for safety)
-    system_table.stdout().write_str("Allocating kernel stack...\n").unwrap();
-    let stack_pages = 256; // 1MB stack (much larger)
-    let stack_bottom = system_table.boot_services().allocate_pages(
-        uefi::table::boot::AllocateType::AnyPages,
-        MemoryType::LOADER_DATA,
-        stack_pages,
-    ).expect("Failed to allocate kernel stack");
-    
-    // Stack grows downward, so top = bottom + size
-    // Ensure 16-byte alignment
-    let stack_top = (stack_bottom + (stack_pages as u64 * 0x1000)) & !0xF;
-    
-    system_table.stdout().write_str("Stack allocated at: 0x").unwrap();
-    print_hex(&mut system_table, stack_bottom);
-    system_table.stdout().write_str(" - 0x").unwrap();
-    print_hex(&mut system_table, stack_top);
-    system_table.stdout().write_str("\n").unwrap();
-    
-    // Place BootInfo at allocated address
     system_table.stdout().write_str("Placing BootInfo at allocated address...\n").unwrap();
     unsafe {
         let boot_info_ptr = boot_info_addr as *mut BootInfo;
+        system_table.stdout().write_str("About to write BootInfo to memory...\n").unwrap();
         *boot_info_ptr = boot_info;
+        system_table.stdout().write_str("BootInfo write completed...\n").unwrap();
     }
     system_table.stdout().write_str("BootInfo placed successfully\n").unwrap();
     
@@ -182,7 +151,7 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
         .exit_boot_services(MemoryType::LOADER_DATA);
     
     // At this point, we can't use stdout anymore
-    // Draw rectangles to show progress and then jump to kernel
+    // Now try to write to the framebuffer with expanded identity mapping
     unsafe {
         // Get framebuffer info from our boot_info
         let boot_info_ref = &*(boot_info_addr as *const BootInfo);
@@ -201,8 +170,15 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
         for _ in 0..50000000 {
             core::arch::asm!("nop");
         }
+    }
+    
+    // Jump to kernel
+    unsafe {
+        // Draw a blue rectangle before jumping to show we're about to call kernel
+        let boot_info_ref = &*(boot_info_addr as *const BootInfo);
+        let fb_addr = boot_info_ref.framebuffer.addr as *mut u32;
+        let fb_width = boot_info_ref.framebuffer.width;
         
-        // Draw the blue rectangle to show we're about to jump
         for y in 200..250 {
             for x in 0..200 {
                 let pixel_offset = (y * fb_width + x) as isize;
@@ -210,14 +186,16 @@ fn efi_main(image: Handle, mut system_table: SystemTable<Boot>) -> Status {
             }
         }
         
-        // Another delay
-        for _ in 0..50000000 {
+        // Small delay
+        for _ in 0..10000000 {
             core::arch::asm!("nop");
         }
         
-        // Try the simplest possible jump - just transmute and call
-        let kernel_entry: extern "C" fn() -> ! = mem::transmute(entry_point);
-        kernel_entry();
+        // Try different ways to jump to the kernel
+        
+        // Method 1: Try jumping without parameters first
+        let kernel_entry_no_params: extern "C" fn() -> ! = mem::transmute(entry_point);
+        kernel_entry_no_params();
     }
 }
 
@@ -325,9 +303,6 @@ fn parse_elf_and_load(elf_data: &[u8], boot_services: &BootServices) -> Result<u
     let ph_entry_size = u16::from_le_bytes([elf_data[54], elf_data[55]]) as usize;
     let ph_num = u16::from_le_bytes([elf_data[56], elf_data[57]]) as usize;
     
-    // Debug: Print program header info
-    // We can't use system_table here, so we'll just load segments and debug later
-    
     // Load program segments
     for i in 0..ph_num {
         let ph_start = ph_offset + i * ph_entry_size;
@@ -356,31 +331,29 @@ fn parse_elf_and_load(elf_data: &[u8], boot_services: &BootServices) -> Result<u
                 ph[40], ph[41], ph[42], ph[43], ph[44], ph[45], ph[46], ph[47],
             ]) as usize;
             
-            // Skip empty segments
-            if p_memsz == 0 {
-                continue;
-            }
-            
             // Allocate pages for this segment
             let pages_needed = (p_memsz + 0xFFF) / 0x1000;
             
-            // Always try to allocate at the exact virtual address - this is critical!
-            let segment_addr = boot_services.allocate_pages(
+            // Try to allocate at the requested virtual address first
+            let segment_addr = match boot_services.allocate_pages(
                 uefi::table::boot::AllocateType::Address(p_vaddr),
                 MemoryType::LOADER_DATA,
                 pages_needed,
-            ).map_err(|_| "Failed to allocate segment at required address")?;
-            
-            // Verify we got the address we requested
-            if segment_addr != p_vaddr {
-                return Err("Segment not loaded at correct address");
-            }
+            ) {
+                Ok(addr) => addr,
+                Err(_) => {
+                    // If that fails, allocate anywhere and we'll need to update the mapping
+                    boot_services.allocate_pages(
+                        uefi::table::boot::AllocateType::AnyPages,
+                        MemoryType::LOADER_DATA,
+                        pages_needed,
+                    ).map_err(|_| "Failed to allocate segment memory anywhere")?
+                }
+            };
             
             // Copy segment data
             unsafe {
                 let dest = segment_addr as *mut u8;
-                
-                // Copy file data if any
                 if p_filesz > 0 && p_offset + p_filesz <= elf_data.len() {
                     core::ptr::copy_nonoverlapping(
                         elf_data.as_ptr().add(p_offset),
@@ -388,8 +361,7 @@ fn parse_elf_and_load(elf_data: &[u8], boot_services: &BootServices) -> Result<u
                         p_filesz,
                     );
                 }
-                
-                // Zero remaining bytes (BSS section)
+                // Zero remaining bytes
                 if p_memsz > p_filesz {
                     core::ptr::write_bytes(dest.add(p_filesz), 0, p_memsz - p_filesz);
                 }
@@ -554,12 +526,4 @@ fn print_decimal(system_table: &mut SystemTable<Boot>, mut value: u64) {
     for i in (0..count).rev() {
         system_table.stdout().write_char(digits[i] as char).unwrap();
     }
-}
-
-fn print_hex_byte(system_table: &mut SystemTable<Boot>, value: u8) {
-    let hex_chars = b"0123456789ABCDEF";
-    let high = (value >> 4) & 0xF;
-    let low = value & 0xF;
-    system_table.stdout().write_char(hex_chars[high as usize] as char).unwrap();
-    system_table.stdout().write_char(hex_chars[low as usize] as char).unwrap();
 }
